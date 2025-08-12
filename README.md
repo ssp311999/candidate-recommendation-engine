@@ -41,7 +41,7 @@ Optionally, it can generate **AI-powered fit summaries** to explain why each can
 
 - **Performance**: Embedding computation is cached for repeated runs with identical inputs.
 - **Scalability**: Designed for small-to-medium batches (e.g., <100 resumes). Large datasets may require batching or async processing.
-- **Deployment**: Works locally, on Streamlit Community Cloud, or Hugging Face Spaces.
+- **Deployment**: Works locally and on Streamlit Community Cloud.
 - **Export**: Rankings can be downloaded as CSV.
 
 ---
