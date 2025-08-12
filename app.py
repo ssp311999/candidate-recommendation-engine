@@ -8,38 +8,44 @@ from io import StringIO
 # -------------------------------
 # Page Config
 # -------------------------------
-
 st.set_page_config(
     page_title="Candidate Recommendation Engine",
-    page_icon="🔍",
-    layout="wide"
+    page_icon="🕵️",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
+# ---------- minimal CSS polish ----------
 st.markdown("""
 <style>
-div[data-testid="stExpander"] > details {
-  border: 1px solid rgba(49,51,63,0.2);
-  border-radius: 10px;
-  padding: .25rem .75rem;
-  background: rgba(49,51,63,0.02);
+.main .block-container { padding-top: 1.6rem; max-width: 1300px; }
+.card { background: var(--secondary-background-color); border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 14px; padding: 16px 18px; }
+.card h4 { margin: 0 0 0.4rem 0; }
+.stButton>button { 
+  border-radius: 10px; padding: 10px 16px; font-weight: 600;
+  background: linear-gradient(135deg,#6aa0ff,#7c9cff,#a58bff);
+  border: none;
 }
-[data-testid="stDataFrame"] thead tr th { font-weight: 600; }
-.block-container { padding-top: 1.5rem; }
+.stButton>button:hover { filter: brightness(1.05); }
+section[data-testid="stFileUploaderDropzone"] { min-height: 160px; }
+.small { opacity: .75; font-size: .9rem; }
+.kpi { font-size: 0.95rem; opacity: .8; }
 </style>
 """, unsafe_allow_html=True)
 
 # -------------------------------
-# Caching & resources
+# Model + helpers
 # -------------------------------
-
 @st.cache_resource(show_spinner=False)
 def load_model():
-    return SentenceTransformer('all-MiniLM-L6-v2')
+    return SentenceTransformer("all-MiniLM-L6-v2")
 
 model = load_model()
 
 @st.cache_data(show_spinner=False)
 def embed_texts(texts: List[str]) -> np.ndarray:
+    # L2-normalized embeddings -> dot product == cosine similarity
     embs = model.encode(
         texts,
         convert_to_numpy=True,
@@ -49,94 +55,114 @@ def embed_texts(texts: List[str]) -> np.ndarray:
     )
     return embs
 
+def rank_resumes(job_desc: str, resumes: List[str]) -> List[Tuple[int, float]]:
+    job_emb = embed_texts([job_desc])[0]
+    resume_embs = embed_texts(resumes)
+    scores = resume_embs @ job_emb  # cosine similarity because normalized
+    order = np.argsort(-scores)
+    return [(int(i), float(scores[i])) for i in order]
+
 @st.cache_data(show_spinner=False)
 def summarize_fit_cached(resume_text: str, job_desc: str) -> str:
     try:
         import openai
-        openai.api_key = st.secrets.get("OPENAI_API_KEY", "sk-REPLACE")
+        openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
+        if not openai.api_key:
+            return "[Summary unavailable: missing OPENAI_API_KEY in secrets]"
         prompt = f"""
-        You are an assistant that explains why a resume is a good fit for a job.
+You are an assistant that explains why a resume is a good fit for a job.
 
-        Job Description:
-        {job_desc}
+Job Description:
+{job_desc}
 
-        Candidate Resume:
-        {resume_text}
+Candidate Resume:
+{resume_text}
 
-        Provide 2-3 sentences summarizing why this candidate is a strong fit for the job.
-        """
+Provide 2–3 sentences summarizing why this candidate is a strong fit.
+"""
+        # Works with legacy openai package; adjust if you use the new SDK
         resp = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
         )
-        return resp['choices'][0]['message']['content'].strip()
+        return resp["choices"][0]["message"]["content"].strip()
     except Exception as e:
         return f"[Summary unavailable: {e}]"
 
 # -------------------------------
-# Core logic
-# -------------------------------
-
-def rank_resumes(job_desc: str, resumes: List[str]) -> List[Tuple[int, float]]:
-    job_emb = embed_texts([job_desc])[0]             
-    resume_embs = embed_texts(resumes)               
-    scores = resume_embs @ job_emb                   
-    order = np.argsort(-scores)                      
-    return [(int(i), float(scores[i])) for i in order]
-
-# -------------------------------
-# Streamlit app
+# App
 # -------------------------------
 def main():
-    st.title("🔍 Candidate Recommendation Engine")
-    st.caption("Rank uploaded resumes against a job description, then generate short fit summaries.")
+    # Sidebar
+    st.sidebar.header("⚙️ Settings")
+    top_k = st.sidebar.slider("Top‑K candidates", 5, 50, 10, step=5)
+    generate_summaries = st.sidebar.toggle("Generate AI fit summaries", value=False, help="Uses your API key if enabled")
+    show_cards = st.sidebar.toggle("Show candidate cards", value=True)
+    show_table = st.sidebar.toggle("Show results table", value=True)
+    st.sidebar.markdown("---")
+    st.sidebar.caption("Tip: you can drag‑drop multiple .txt resumes.")
 
-    with st.sidebar:
-        st.header("Settings")
-        generate_summaries = st.toggle("Generate summaries", value=True, help="Turn off for fastest results.")
-        default_topk = 10
-        top_k = st.number_input(
-            "Top K candidates",
-            min_value=1, max_value=50, value=default_topk, step=1,
-            help="How many candidates to display after ranking."
-        )
-        with st.expander("Advanced"):
-            show_cards = st.toggle("Show candidate cards", value=True, help="Expandable per-candidate cards under the table.")
-            show_table = st.toggle("Show results table", value=True, help="Sortable table with progress bars.")
-            st.caption("Both views can be shown at once.")
+    # Header
+    col1, col2 = st.columns([0.75, 0.25])
+    with col1:
+        st.markdown("### 🕵️ Candidate Recommendation Engine")
+        st.caption("Rank uploaded resumes against a job description using semantic similarity. Optionally generate short fit summaries.")
+    with col2:
+        st.metric("Status", "Idle", help="Will update after ranking")
 
-    col_left, col_right = st.columns([1.2, 1])
+    st.markdown("")
 
-    with col_left:
+    # Inputs (two columns)
+    left, right = st.columns([1.6, 1.0], gap="large")
+    with left:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("#### Job Description")
         job_desc = st.text_area(
-            "Job Description",
-            placeholder="Paste the role overview, key responsibilities, and requirements…",
-            height=220
+            "Paste the role overview, responsibilities, and requirements…",
+            label_visibility="collapsed",
+            height=260,
+            placeholder="Paste the job description here…"
         )
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    with col_right:
+    with right:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("#### Upload Resumes (.txt)")
         uploaded_files = st.file_uploader(
-            "Upload Resumes (.txt)",
-            type=["txt"], accept_multiple_files=True,
-            help="Drag and drop multiple .txt resumes."
+            "Drag and drop files here or click Browse",
+            type=["txt"],
+            accept_multiple_files=True,
+            label_visibility="collapsed"
         )
         if uploaded_files:
-            total_bytes = sum(getattr(f, "size", 0) or 0 for f in uploaded_files)
-            st.metric("Files uploaded", f"{len(uploaded_files)}")
-            st.caption(f"Total size: ~{total_bytes/1024:.1f} KB")
+            st.markdown("**Selected files:**")
+            for f in uploaded_files[:8]:
+                st.markdown(f"- ✅ `{f.name}`")
+            if len(uploaded_files) > 8:
+                st.markdown(f"*…and {len(uploaded_files)-8} more*")
+        else:
+            st.caption("No files yet.")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        if job_desc:
-            words = len(job_desc.split())
-            st.metric("Job description length", f"{words} words")
-            st.progress(min(words / 1500, 1.0))
+    st.markdown("")
 
-    st.divider()
+    # Action
+    action_col, _ = st.columns([1, 3])
+    with action_col:
+        run = st.button("Rank Candidates", use_container_width=False)
 
+    st.markdown("---")
+
+    # Guard
+    if not run:
+        st.info("Add a job description and upload one or more `.txt` resumes, then click **Rank Candidates**.")
+        return
     if not job_desc or not uploaded_files:
-        st.info("Add a job description and upload one or more .txt resumes to begin.")
-        st.stop()
+        st.warning("Please provide both a job description and at least one resume.")
+        return
 
+    # Read resumes
     resumes, ids = [], []
     for f in uploaded_files:
         try:
@@ -146,6 +172,7 @@ def main():
         resumes.append(text or "")
         ids.append(f.name)
 
+    # Ranking + (optional) summaries
     with st.status("Computing similarities…", expanded=False) as status:
         ranked = rank_resumes(job_desc, resumes)
         k = min(int(top_k), len(ranked))
@@ -163,27 +190,19 @@ def main():
             })
             if generate_summaries:
                 prog.progress(n / k, text=f"Creating summaries… ({n}/{k})")
-
         status.update(label="Done!", state="complete")
 
     st.success(f"Top {k} candidate{'s' if k != 1 else ''}:")
 
     df = pd.DataFrame(results)
 
-    if st.session_state.get("show_table", True) if False else True:
-        pass
-
-    if 'show_table' not in locals():
-        show_table = True
-    if 'show_cards' not in locals():
-        show_cards = True
+    # Normalize score for progress bars
+    score_min = float(df["Similarity"].min()) if not df.empty else 0.0
+    score_max = float(df["Similarity"].max()) if not df.empty else 1.0
+    denom = (score_max - score_min) if (score_max - score_min) > 1e-9 else 1.0
+    df["_score_norm"] = ((df["Similarity"] - score_min) / denom).clip(0, 1)
 
     if show_table:
-        score_min = float(df["Similarity"].min()) if not df.empty else 0.0
-        score_max = float(df["Similarity"].max()) if not df.empty else 1.0
-        denom = (score_max - score_min) if (score_max - score_min) > 1e-9 else 1.0
-        df["_score_norm"] = ((df["Similarity"] - score_min) / denom).clip(0, 1)
-
         st.dataframe(
             df[["Candidate", "_score_norm", "Why a good fit", "Similarity"]],
             use_container_width=True,
@@ -206,18 +225,19 @@ def main():
         st.subheader("Candidate cards")
         for row in df.itertuples(index=False):
             with st.expander(f"{row.Candidate}  •  similarity {row.Similarity:.3f}", expanded=False):
+                st.progress(float(getattr(row, "_score_norm", 0.0)))
+                if getattr(row, "Why a good fit", ""):
+                    st.markdown(getattr(row, "Why a good fit"))
+                # quick preview
                 try:
-                    score_norm = float(getattr(row, "_score_norm", 0.0))
-                except Exception:
-                    score_norm = 0.0
-                st.progress(score_norm)
-                if row._asdict().get("Why a good fit"):
-                    st.markdown(row._asdict()["Why a good fit"])
-                with st.popover("Preview resume (first 1200 chars)"):
                     idx = ids.index(row.Candidate)
                     preview = resumes[idx][:1200]
+                except Exception:
+                    preview = ""
+                with st.popover("Preview resume (first 1200 chars)"):
                     st.code(preview or "[empty]", language="markdown")
 
+    # Download
     csv_buf = StringIO()
     (df.drop(columns=["_score_norm"], errors="ignore")).to_csv(csv_buf, index=False)
     st.download_button(
