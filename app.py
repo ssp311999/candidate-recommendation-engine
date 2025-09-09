@@ -65,10 +65,15 @@ def rank_resumes(job_desc: str, resumes: List[str]) -> List[Tuple[int, float]]:
 @st.cache_data(show_spinner=False)
 def summarize_fit_cached(resume_text: str, job_desc: str) -> str:
     try:
-        import openai
-        openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
-        if not openai.api_key:
+        from openai import OpenAI
+        import streamlit as st
+
+        api_key = st.secrets.get("OPENAI_API_KEY", "")
+        if not api_key:
             return "[Summary unavailable: missing OPENAI_API_KEY in secrets]"
+
+        client = OpenAI(api_key=api_key)
+
         prompt = f"""
 You are an assistant that explains why a resume is a good fit for a job.
 
@@ -80,13 +85,15 @@ Candidate Resume:
 
 Provide 2–3 sentences summarizing why this candidate is a strong fit.
 """
-        # Works with legacy openai package; adjust if you use the new SDK
-        resp = openai.ChatCompletion.create(
-            model="gpt-4",
+
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",  # you can also use "gpt-4" or "gpt-4o"
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
         )
-        return resp["choices"][0]["message"]["content"].strip()
+
+        return resp.choices[0].message.content.strip()
+
     except Exception as e:
         return f"[Summary unavailable: {e}]"
 
