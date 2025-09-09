@@ -219,7 +219,7 @@ def main():
                 "_score_norm": st.column_config.ProgressColumn(
                     "Match",
                     help="Similarity scaled within the shown set",
-                    format="%.0f%%",
+                    # format="%.0f%%",
                     min_value=0.0,
                     max_value=1.0
                 ),
