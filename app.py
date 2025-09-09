@@ -87,7 +87,7 @@ Provide 2–3 sentences summarizing why this candidate is a strong fit.
 """
 
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",  # you can also use "gpt-4" or "gpt-4o"
+            model="gpt-4o-mini", 
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
         )
