@@ -232,7 +232,7 @@ def main():
         st.subheader("Candidate cards")
         for row in df.itertuples(index=False):
             with st.expander(f"{row.Candidate}  •  similarity {row.Similarity:.3f}", expanded=False):
-                st.progress(float(getattr(row, "_score_norm", 0.0)))
+                # st.progress(float(getattr(row, "_score_norm", 0.0)))
                 if getattr(row, "Why a good fit", ""):
                     st.markdown(getattr(row, "Why a good fit"))
                 # quick preview
