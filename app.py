@@ -115,8 +115,8 @@ def main():
     with col1:
         st.markdown("### 🕵️ Candidate Recommendation Engine")
         st.caption("Rank uploaded resumes against a job description using semantic similarity. Optionally generate short fit summaries.")
-    with col2:
-        st.metric("Status", "Idle", help="Will update after ranking")
+    # with col2:
+    #     st.metric("Status", "Idle", help="Will update after ranking")
 
     st.markdown("")
 
